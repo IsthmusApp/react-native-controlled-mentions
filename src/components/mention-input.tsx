@@ -5,6 +5,7 @@ import {
   TextInput,
   TextInputSelectionChangeEventData,
   View,
+  Platform
 } from 'react-native';
 
 import { MentionInputProps, MentionPartType, Suggestion } from '../types';
@@ -21,15 +22,11 @@ const MentionInput: FC<MentionInputProps> = (
   {
     value,
     onChange,
-
     partTypes = [],
-
     inputRef: propInputRef,
-
     containerStyle,
-
     onSelectionChange,
-
+    overlayContainerStyle,
     ...textInputProps
   },
 ) => {
@@ -74,7 +71,7 @@ const MentionInput: FC<MentionInputProps> = (
    * - Get updated value
    * - Trigger onChange callback with new value
    */
-  const onSuggestionPress = (mentionType: MentionPartType) => (suggestion: Suggestion) => {
+  const onSuggestionPress = (mentionType: MentionPartType, keyword: String) => (suggestion: Suggestion) => {
     const newValue = generateValueWithAddedSuggestion(
       parts,
       mentionType,
@@ -88,19 +85,22 @@ const MentionInput: FC<MentionInputProps> = (
     }
 
     onChange(newValue);
-
-    /**
-     * Move cursor to the end of just added mention starting from trigger string and including:
-     * - Length of trigger string
-     * - Length of mention name
-     * - Length of space after mention (1)
-     *
-     * Not working now due to the RN bug
-     */
-    // const newCursorPosition = currentPart.position.start + triggerPartIndex + trigger.length +
-    // suggestion.name.length + 1;
-
-    // textInput.current?.setNativeProps({selection: {start: newCursorPosition, end: newCursorPosition}});
+  
+    if (Platform.OS === 'web') {
+      textInput.current?.focus();
+    
+      /**
+       * Move cursor to the end of just added mention - especially important for PLATFORM.OS web:
+       * - Previous selection position
+       * + Length of mention name
+       * - Length of trigger string
+       * - Keyword text (i.e. "mi" for @Mike)
+       * +? Length of space after mention (1)
+       */
+      const newCursorPosition = selection.start + suggestion.name.length - mentionType.trigger.length - keyword.length + (mentionType.isInsertSpaceAfterMention ? 1 : 0) + 1;
+    
+      setSelection({start: newCursorPosition, end: newCursorPosition}); //<TextInput selection doesn't seem to work on mobile
+    }
   };
 
   const handleTextInputRef = (ref: TextInput) => {
@@ -119,7 +119,7 @@ const MentionInput: FC<MentionInputProps> = (
     <React.Fragment key={mentionType.trigger}>
       {mentionType.renderSuggestions && mentionType.renderSuggestions({
         keyword: keywordByTrigger[mentionType.trigger],
-        onSuggestionPress: onSuggestionPress(mentionType),
+        onSuggestionPress: onSuggestionPress(mentionType, keywordByTrigger[mentionType.trigger] || ''),
       })}
     </React.Fragment>
   );
@@ -134,18 +134,30 @@ const MentionInput: FC<MentionInputProps> = (
         )) as MentionPartType[])
         .map(renderMentionSuggestions)
       }
-
-      <TextInput
-        multiline
-
-        {...textInputProps}
-
-        ref={handleTextInputRef}
-
-        onChangeText={onChangeInput}
-        onSelectionChange={handleSelectionChange}
-      >
-        <Text>
+  
+      <View>
+        <TextInput
+          {...textInputProps}
+          value={plainText}
+          ref={handleTextInputRef}
+          multiline
+          {...Platform.OS === 'web' ? {selection} : {}}
+          onChangeText={onChangeInput}
+          onSelectionChange={handleSelectionChange}
+        />
+        
+        <Text
+          style={[
+            {
+              position: 'absolute',
+              paddingTop: Platform.OS === 'web' ? 0 : 5,
+            },
+            textInputProps.style,
+            overlayContainerStyle
+          ]}
+          // @ts-ignore
+          pointerEvents={'none'}
+        >
           {parts.map(({text, partType, data}, index) => partType ? (
             <Text
               key={`${index}-${data?.trigger ?? 'pattern'}`}
@@ -157,7 +169,7 @@ const MentionInput: FC<MentionInputProps> = (
             <Text key={index}>{text}</Text>
           ))}
         </Text>
-      </TextInput>
+      </View>
 
       {(partTypes
         .filter(one => (
